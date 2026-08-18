@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import config from './config.js';
+import { log } from './log.js';
 import { db, nowIso, newId } from './db.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 
@@ -95,28 +96,56 @@ export async function downloadTarball(token, fullName, ref) {
  * Fires the public test repo's workflow. GitHub's dispatch endpoint returns no
  * run id, so the workflow reports its own id back on first contact.
  */
-export async function dispatchWorkflow({ runId, projectSlug, skipFirebase }) {
+/**
+ * Dispatch is retried because the network path to GitHub is measurably
+ * unreliable from some hosts: a single transient `fetch failed` would
+ * otherwise strand a run in `error` with nothing actually wrong.
+ */
+export async function dispatchWorkflow({ runId, projectSlug, skipFirebase, attempts = 4 }) {
   const { repo, workflow, ref, dispatchToken } = config.ci;
   if (!repo) throw new GitHubError('CI_REPO is not configured on the server.');
   if (!dispatchToken) throw new GitHubError('CI_DISPATCH_TOKEN is not configured on the server.');
 
-  const res = await fetch(`${API}/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
-    method: 'POST',
-    headers: { ...headers(dispatchToken), 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ref,
-      inputs: {
-        server_url: config.publicUrl,
-        run_id: runId,
-        project: projectSlug || '',
-        skip_firebase: skipFirebase ? 'true' : 'false',
-      },
-    }),
+  const body = JSON.stringify({
+    ref,
+    inputs: {
+      server_url: config.publicUrl,
+      run_id: runId,
+      project: projectSlug || '',
+      skip_firebase: skipFirebase ? 'true' : 'false',
+    },
   });
 
-  if (res.status === 204) return true;
-  const body = await res.text();
-  throw new GitHubError(`Workflow dispatch failed (${res.status}): ${body.slice(0, 300)}`);
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(`${API}/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
+        method: 'POST',
+        headers: { ...headers(dispatchToken), 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (res.status === 204) return true;
+
+      const text = await res.text();
+      // 4xx means the request itself is wrong; retrying cannot help.
+      if (res.status >= 400 && res.status < 500) {
+        throw new GitHubError(`Workflow dispatch failed (${res.status}): ${text.slice(0, 300)}`);
+      }
+      lastError = new GitHubError(`Workflow dispatch failed (${res.status}): ${text.slice(0, 200)}`);
+    } catch (err) {
+      if (err instanceof GitHubError) throw err;
+      lastError = new GitHubError(`Could not reach GitHub: ${err.message}`);
+    }
+
+    if (attempt < attempts) {
+      log.warn('dispatch attempt failed, retrying', { attempt, error: lastError.message });
+      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+    }
+  }
+
+  throw lastError;
 }
 
 export function ciRepoUrl() {
