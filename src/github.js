@@ -174,15 +174,38 @@ export async function downloadWorkflowArtifact({ runId, name }) {
     throw new GitHubError(`No artifact named \`${name}\` on GitHub run ${runId}.`);
   }
 
-  const res = await fetch(match.archive_download_url, {
-    headers: headers(dispatchToken),
-    redirect: 'follow',
-  });
-  if (!res.ok) throw new GitHubError(`Artifact download failed (${res.status}).`);
-
   fs.mkdirSync(config.tmpDir, { recursive: true });
-  const zipPath = path.join(config.tmpDir, `gha-${newId()}.zip`);
-  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(zipPath));
 
-  return { zipPath, sizeBytes: match.size_in_bytes, expired: match.expired };
+  // The route to GitHub drops long transfers, so a single attempt is not
+  // enough: undici surfaces the interruption as `terminated` or `fetch failed`
+  // partway through the body. Each attempt restarts cleanly into a fresh file.
+  let lastError = null;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const zipPath = path.join(config.tmpDir, `gha-${newId()}.zip`);
+    try {
+      const res = await fetch(match.archive_download_url, {
+        headers: headers(dispatchToken),
+        redirect: 'follow',
+        signal: AbortSignal.timeout(600000),
+      });
+      if (!res.ok) throw new GitHubError(`Artifact download failed (${res.status}).`);
+
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(zipPath));
+
+      const written = fs.statSync(zipPath).size;
+      if (match.size_in_bytes && written < match.size_in_bytes * 0.99) {
+        throw new Error(`truncated: got ${written} of ${match.size_in_bytes} bytes`);
+      }
+
+      log.info('artifact downloaded from github', { name, attempt, bytes: written });
+      return { zipPath, sizeBytes: written, expired: match.expired };
+    } catch (err) {
+      await fs.promises.rm(zipPath, { force: true }).catch(() => {});
+      lastError = err;
+      log.warn('artifact download attempt failed', { name, attempt, error: err.message });
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 3000 * attempt));
+    }
+  }
+
+  throw new GitHubError(`Could not download ${name} after 4 attempts: ${lastError?.message}`);
 }
