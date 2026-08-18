@@ -63,6 +63,11 @@ export function settingsPage({ user, flash, githubLogin, repoCount, ciKeys, newK
               The runner sends this key as a bearer token to fetch an archive and report progress.
               Without a project identifier it takes the newest archive across all your projects.
             </p>
+            <p class="body-sm body-muted">
+              A <strong>pipeline</strong> key can read archives and report progress — all the public
+              runner needs. An <strong>agent</strong> key can also create projects, upload archives,
+              and start runs, so keep it out of any repository.
+            </p>
 
             ${newKey ? html`
               <div class="stack-2">
@@ -76,10 +81,13 @@ export function settingsPage({ user, flash, githubLogin, repoCount, ciKeys, newK
             ${ciKeys.length ? html`
               <div class="table-scroll">
                 <table class="table">
-                  <thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+                  <thead><tr><th>Name</th><th>Type</th><th>Prefix</th><th>Created</th><th>Last used</th><th></th></tr></thead>
                   <tbody>${raw(ciKeys.map((k) => html`
                     <tr>
                       <td class="table-prose">${k.name}</td>
+                      <td>${k.kind === 'agent'
+                        ? html`<span class="badge badge-warn"><span class="badge-dot"></span>agent</span>`
+                        : html`<span class="badge badge-muted"><span class="badge-dot"></span>pipeline</span>`}</td>
                       <td>${k.prefix}…</td>
                       <td>${formatAgo(k.created_at)}</td>
                       <td>${k.last_used_at ? formatAgo(k.last_used_at) : 'never'}</td>
@@ -97,6 +105,13 @@ export function settingsPage({ user, flash, githubLogin, repoCount, ciKeys, newK
                 <label for="keyname">Key name</label>
                 <input id="keyname" name="name" type="text" placeholder="github-actions" required maxlength="60">
                 <span class="field-help">Name it after where it will live, so revoking it later is obvious.</span>
+              </div>
+              <div class="field">
+                <label for="keykind">Type</label>
+                <select id="keykind" name="kind">
+                  <option value="ci">Pipeline — read archives, report progress</option>
+                  <option value="agent">Agent — also create projects and start runs</option>
+                </select>
               </div>
               <div class="form-actions"><button class="btn btn-accent" type="submit">Create key</button></div>
             </form>

@@ -144,6 +144,23 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_run    ON artifacts(run_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 `);
 
+/**
+ * Adds columns to existing tables. CREATE TABLE IF NOT EXISTS covers a fresh
+ * database but silently skips a schema that has since gained a column, so
+ * additive changes are applied here instead.
+ */
+function addColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  log.info('migration: column added', { table, column });
+}
+
+// `ci` keys reach only the archives and run reporting the pipeline needs.
+// `agent` keys can also create projects, upload archives, and start runs — too
+// much authority to leave sitting in a public repository's secrets.
+addColumn('ci_keys', 'kind', "TEXT NOT NULL DEFAULT 'ci'");
+
 export const nowIso = () => new Date().toISOString();
 export const newId = () => crypto.randomUUID();
 

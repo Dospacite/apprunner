@@ -447,10 +447,11 @@ pagesRouter.post('/settings/github/disconnect', (req, res) => {
 
 pagesRouter.post('/settings/keys', (req, res) => {
   const name = String(req.body.name || '').trim() || 'github-actions';
+  const kind = req.body.kind === 'agent' ? 'agent' : 'ci';
   const key = generateCiKey();
 
-  db.prepare('INSERT INTO ci_keys (id, user_id, name, prefix, key_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(newId(), req.user.id, name.slice(0, 60), key.slice(0, 12), hashToken(key), nowIso());
+  db.prepare('INSERT INTO ci_keys (id, user_id, name, prefix, key_hash, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(newId(), req.user.id, name.slice(0, 60), key.slice(0, 12), hashToken(key), kind, nowIso());
 
   res.flash('key', key);
   res.redirect('/settings');

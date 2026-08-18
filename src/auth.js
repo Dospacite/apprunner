@@ -72,27 +72,38 @@ export function requireUser(req, res, next) {
 }
 
 /**
- * Bearer-token auth for the CI pipeline. The key grants read access to the
- * owner's archives and write access to their run status, nothing else.
+ * Bearer-token auth. `kind` narrows what the key may do; an agent key is a
+ * superset of a CI key, so a minimum of 'ci' accepts both.
  */
-export function requireCiKey(req, res, next) {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ')
-    ? header.slice(7).trim()
-    : (req.headers['x-apprunner-key'] || '').trim();
+function bearerAuth(minimumKind) {
+  return function authenticateKey(req, res, next) {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ')
+      ? header.slice(7).trim()
+      : (req.headers['x-apprunner-key'] || '').trim();
 
-  if (!token) return res.status(401).json({ error: 'Missing CI key.' });
+    if (!token) return res.status(401).json({ error: 'Missing API key.' });
 
-  const row = db.prepare(
-    `SELECT ci_keys.*, users.id AS owner_id FROM ci_keys
-     JOIN users ON users.id = ci_keys.user_id
-     WHERE ci_keys.key_hash = ? AND ci_keys.revoked_at IS NULL`,
-  ).get(hashToken(token));
+    const row = db.prepare(
+      `SELECT ci_keys.*, users.id AS owner_id FROM ci_keys
+       JOIN users ON users.id = ci_keys.user_id
+       WHERE ci_keys.key_hash = ? AND ci_keys.revoked_at IS NULL`,
+    ).get(hashToken(token));
 
-  if (!row) return res.status(401).json({ error: 'Invalid or revoked CI key.' });
+    if (!row) return res.status(401).json({ error: 'Invalid or revoked key.' });
 
-  db.prepare('UPDATE ci_keys SET last_used_at = ? WHERE id = ?').run(nowIso(), row.id);
-  req.ciKey = row;
-  req.user = db.prepare('SELECT * FROM users WHERE id = ?').get(row.owner_id);
-  next();
+    if (minimumKind === 'agent' && row.kind !== 'agent') {
+      return res.status(403).json({
+        error: 'This endpoint needs an agent key. Create one in Settings.',
+      });
+    }
+
+    db.prepare('UPDATE ci_keys SET last_used_at = ? WHERE id = ?').run(nowIso(), row.id);
+    req.ciKey = row;
+    req.user = db.prepare('SELECT * FROM users WHERE id = ?').get(row.owner_id);
+    next();
+  };
 }
+
+export const requireCiKey = bearerAuth('ci');
+export const requireAgentKey = bearerAuth('agent');

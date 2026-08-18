@@ -9,6 +9,7 @@ import { flashMiddleware } from './flash.js';
 import { reapStaleRuns } from './runs.js';
 import { pagesRouter } from './routes/pages.js';
 import { ciRouter } from './routes/ci.js';
+import { agentRouter } from './routes/agent.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,8 +36,10 @@ app.use(express.static(path.join(here, '..', 'public'), {
   setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
 }));
 
-// The CI router authenticates by bearer key and must not see browser sessions.
+// Both key-authenticated routers sit above the session middleware so a browser
+// cookie can never stand in for a bearer key.
 app.use('/api/v1/ci', ciRouter);
+app.use('/api/v1/agent', agentRouter);
 
 app.use(sessionMiddleware);
 app.use(flashMiddleware);
