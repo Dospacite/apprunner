@@ -15,7 +15,7 @@ const PENDING_DETAIL = (index) => (index === 0 ? 'Not started.' : 'Waiting for t
  */
 export function pipelineRail(stages, { compact = false } = {}) {
   const parts = stages.map((stage, index) => {
-    const gate = index === 0 ? '' : gateClass(stages[index - 1]);
+    const gate = index === 0 ? '' : gateClass(stages[index - 1], stage);
     const connector = index === 0 ? '' : `<div class="rail-gate ${gate}"></div>`;
     const detail = stage.detail
       || (stage.status === 'pending' ? PENDING_DETAIL(index) : DETAIL_FALLBACK[stage.status])
@@ -38,9 +38,12 @@ export function pipelineRail(stages, { compact = false } = {}) {
   return raw(`<div class="rail" role="list" aria-label="Build pipeline">${parts.join('')}</div>`);
 }
 
-function gateClass(previous) {
-  if (previous.status === 'passed') return 'rail-gate-open';
+function gateClass(previous, current) {
   if (previous.status === 'failed') return 'rail-gate-closed';
+  // Nothing is flowing into a stage that will not run, however the gate above
+  // it resolved, so the connector stays neutral rather than reading as live.
+  if (current.status === 'skipped') return '';
+  if (previous.status === 'passed') return 'rail-gate-open';
   if (previous.status === 'running') return 'rail-gate-live';
   return '';
 }
