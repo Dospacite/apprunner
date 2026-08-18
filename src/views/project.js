@@ -71,10 +71,10 @@ export function projectPage({
           <button class="btn btn-accent" type="submit" ${canRun ? '' : 'disabled'}>Build and test</button>
         </form>
         ${firebase.used >= firebase.quota
-          ? html`<p class="body-sm" style="color: #8a6d0b">
+          ? html`<p class="body-sm body-warn">
               Firebase Test Lab is at its daily limit (${firebase.used}/${firebase.quota}). The stage will report as skipped.
             </p>`
-          : html`<p class="body-sm" style="color: var(--meta)">
+          : html`<p class="body-sm body-meta">
               Firebase Test Lab: ${firebase.used}/${firebase.quota} device tests used in the last 24 hours.
             </p>`}
       </div>`;
@@ -126,7 +126,7 @@ export function projectPage({
               ? html`<form id="resync-form" method="post" action="/projects/${project.id}/resync"></form>`
               : raw('')}
             ${project.github_repo && !githubConnected
-              ? html`<p class="body-sm" style="color: #8a6d0b">
+              ? html`<p class="body-sm body-warn">
                   Connect GitHub in <a href="/settings">Settings</a> before resyncing ${project.github_repo}.
                 </p>`
               : raw('')}
@@ -135,7 +135,7 @@ export function projectPage({
           <div class="card card-flat">
             <div class="row-between">
               <h3>Archives</h3>
-              <span class="body-mono" style="color: var(--meta); font-size: var(--text-xs)">${archives.length} version${archives.length === 1 ? '' : 's'}</span>
+              <span class="body-mono body-meta" style="font-size: var(--text-xs)">${archives.length} version${archives.length === 1 ? '' : 's'}</span>
             </div>
             ${archives.length ? html`
               <div class="table-scroll">
@@ -143,13 +143,13 @@ export function projectPage({
                   <thead><tr><th>Version</th><th>Source</th><th>Ref</th><th>Size</th><th>Added</th><th></th></tr></thead>
                   <tbody>${raw(archives.map((a) => archiveRow(a, latest && a.id === latest.id).value).join(''))}</tbody>
                 </table>
-              </div>` : html`<p class="body-sm" style="color: var(--meta)">No archives yet.</p>`}
+              </div>` : html`<p class="body-sm body-meta">No archives yet.</p>`}
           </div>
 
           <div class="card card-flat">
             <div class="row-between">
               <h3>Runs</h3>
-              <span class="body-mono" style="color: var(--meta); font-size: var(--text-xs)">${runs.length ? `latest #${runs[0].number}` : 'none'}</span>
+              <span class="body-mono body-meta" style="font-size: var(--text-xs)">${runs.length ? `latest #${runs[0].number}` : 'none'}</span>
             </div>
             ${runs.length ? html`
               <div class="table-scroll">
@@ -157,7 +157,7 @@ export function projectPage({
                   <thead><tr><th>Run</th><th>Status</th><th>Outcome</th><th>Duration</th><th>Started</th></tr></thead>
                   <tbody>${raw(runs.map((r) => runRow(r).value).join(''))}</tbody>
                 </table>
-              </div>` : html`<p class="body-sm" style="color: var(--meta)">No runs yet.</p>`}
+              </div>` : html`<p class="body-sm body-meta">No runs yet.</p>`}
           </div>
         </div>
 
@@ -181,7 +181,7 @@ export function projectPage({
                 ? html`The runner reads this project with a CI key. Manage keys in <a href="/settings">Settings</a>.`
                 : html`No CI key exists yet. Create one in <a href="/settings">Settings</a> before running the pipeline.`}
             </p>
-            ${ciRepo ? html`<p class="body-sm" style="color: var(--meta)">Pipeline repository: <a href="${ciRepo}">${ciRepo.replace('https://github.com/', '')}</a></p>` : raw('')}
+            ${ciRepo ? html`<p class="body-sm body-meta">Pipeline repository: <a href="${ciRepo}">${ciRepo.replace('https://github.com/', '')}</a></p>` : raw('')}
           </div>
         </div>
       </div>
