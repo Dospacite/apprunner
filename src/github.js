@@ -151,3 +151,38 @@ export async function dispatchWorkflow({ runId, projectSlug, skipFirebase, attem
 export function ciRepoUrl() {
   return config.ci.repo ? `https://github.com/${config.ci.repo}` : '';
 }
+
+/**
+ * Downloads a GitHub Actions artifact to a temp file.
+ *
+ * The pipeline publishes build output to Actions rather than pushing it here,
+ * because the runner-to-host direction of the GitHub route is far slower than
+ * this host pulling from GitHub. The API hands back a zip wrapper regardless of
+ * what was uploaded, so the caller unwraps it.
+ */
+export async function downloadWorkflowArtifact({ runId, name }) {
+  const { repo, dispatchToken } = config.ci;
+  if (!repo) throw new GitHubError('CI_REPO is not configured on the server.');
+  if (!dispatchToken) throw new GitHubError('CI_DISPATCH_TOKEN is not configured on the server.');
+
+  const listed = await ghFetch(dispatchToken, `/repos/${repo}/actions/runs/${runId}/artifacts?per_page=100`);
+  if (!listed.ok) throw new GitHubError(`Could not list artifacts for run ${runId} (${listed.status}).`);
+
+  const { artifacts = [] } = await listed.json();
+  const match = artifacts.find((a) => a.name === name && !a.expired);
+  if (!match) {
+    throw new GitHubError(`No artifact named \`${name}\` on GitHub run ${runId}.`);
+  }
+
+  const res = await fetch(match.archive_download_url, {
+    headers: headers(dispatchToken),
+    redirect: 'follow',
+  });
+  if (!res.ok) throw new GitHubError(`Artifact download failed (${res.status}).`);
+
+  fs.mkdirSync(config.tmpDir, { recursive: true });
+  const zipPath = path.join(config.tmpDir, `gha-${newId()}.zip`);
+  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(zipPath));
+
+  return { zipPath, sizeBytes: match.size_in_bytes, expired: match.expired };
+}

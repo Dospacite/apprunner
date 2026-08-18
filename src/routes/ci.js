@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import express from 'express';
 import multer from 'multer';
 import config from '../config.js';
@@ -11,7 +13,10 @@ import {
   getRun, getStages, updateStage, addEvent, addLog, finishRun,
   markRunStarted, STAGE_KEYS, isTerminal,
 } from '../runs.js';
+import * as github from '../github.js';
 import { log } from '../log.js';
+
+const execFileAsync = promisify(execFile);
 
 const upload = multer({
   dest: config.tmpDir,
@@ -258,6 +263,84 @@ ciRouter.post('/runs/:runId/artifacts', upload.single('file'), async (req, res) 
   addEvent(run.id, kind, 'success', `Uploaded ${filename} (${(size / 1048576).toFixed(1)} MB).`);
   res.json({ ok: true, id, sha256, sizeBytes: size });
 });
+
+/**
+ * Pulls build output from GitHub Actions instead of receiving a push.
+ *
+ * Uploading from a runner to this host runs at 5-57 KB/s, while this host pulls
+ * from GitHub at ~285 KB/s, so the transfer is inverted. Responds immediately
+ * and fetches in the background: the download outlives the workflow step, and
+ * holding the request open would just reintroduce a long-lived connection.
+ */
+ciRouter.post('/runs/:runId/artifacts/from-github', (req, res) => {
+  const run = loadOwnedRun(req, res);
+  if (!run) return;
+
+  const { github_run_id: ghRunId, name, kind = 'ios-app', filename } = req.body || {};
+  if (!ghRunId || !name) {
+    return res.status(400).json({ error: 'github_run_id and name are required.' });
+  }
+
+  res.status(202).json({ ok: true, fetching: { githubRunId: String(ghRunId), name } });
+
+  // Deliberately not awaited: the response is already sent.
+  ingestGithubArtifact(run, { ghRunId: String(ghRunId), name, kind, filename })
+    .catch((err) => {
+      log.error('github artifact ingest failed', { runId: run.id, error: err.message });
+      addEvent(run.id, kind, 'error', `Could not fetch ${name} from GitHub: ${err.message}`);
+    });
+});
+
+async function ingestGithubArtifact(run, { ghRunId, name, kind, filename }) {
+  const started = Date.now();
+  const { zipPath } = await github.downloadWorkflowArtifact({ runId: ghRunId, name });
+
+  const workDir = path.join(config.tmpDir, `gha-${newId()}`);
+  try {
+    await fs.promises.mkdir(workDir, { recursive: true });
+    // Actions always wraps uploads in a zip, whatever was put in.
+    await execFileAsync('unzip', ['-qq', '-o', zipPath, '-d', workDir]);
+
+    const entries = (await fs.promises.readdir(workDir, { withFileTypes: true }))
+      .filter((e) => e.isFile());
+    if (!entries.length) throw new Error('the artifact archive contained no file');
+
+    // The archive may hold several outputs; pick the requested one rather than
+    // whichever readdir happened to return first, or the rename would mislabel
+    // one file as another.
+    const wanted = filename ? path.basename(filename) : '';
+    const chosen = entries.find((e) => e.name === wanted) || entries[0];
+    if (wanted && chosen.name !== wanted) {
+      log.warn('requested artifact not in archive; using what was found', {
+        runId: run.id, wanted, using: chosen.name,
+      });
+    }
+
+    const extracted = path.join(workDir, chosen.name);
+    const finalName = chosen.name;
+
+    const dir = path.join(config.artifactDir, run.id);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const id = newId();
+    const storagePath = path.join(dir, `${id}-${finalName}`);
+    await fs.promises.rename(extracted, storagePath);
+
+    const sha256 = await sha256Of(storagePath);
+    const size = (await fs.promises.stat(storagePath)).size;
+
+    db.prepare(
+      `INSERT INTO artifacts (id, run_id, kind, filename, storage_path, size_bytes, sha256, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, run.id, kind, finalName, storagePath, size, sha256, nowIso());
+
+    const seconds = ((Date.now() - started) / 1000).toFixed(1);
+    addEvent(run.id, kind, 'success', `Pulled ${finalName} from GitHub (${(size / 1048576).toFixed(1)} MB in ${seconds}s).`);
+    log.info('github artifact ingested', { runId: run.id, filename: finalName, size, seconds });
+  } finally {
+    await fs.promises.rm(zipPath, { force: true }).catch(() => {});
+    await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 ciRouter.post('/runs/:runId/finish', (req, res) => {
   const run = loadOwnedRun(req, res);
