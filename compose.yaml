@@ -1,0 +1,51 @@
+name: apprunner
+
+x-asgard:
+  primary-service: web
+  services:
+    web:
+      role: web
+      public: true
+      port: 8080
+      health-path: /healthz
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      DATA_DIR: /data
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Public origin — used for the CI callback URLs handed to GitHub Actions.
+      PUBLIC_URL: ${PUBLIC_URL:-https://apprunner.asgard.rousoftware.com}
+
+      # Seeded operator account. Password is read once at first boot.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-ege}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      # Encrypts GitHub tokens at rest in the SQLite file.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+
+      # Public test repository that runs the build/test pipeline.
+      CI_REPO: ${CI_REPO:-Dospacite/apprunner-ci}
+      CI_WORKFLOW: ${CI_WORKFLOW:-build-and-test.yml}
+      CI_REF: ${CI_REF:-main}
+      # Token with actions:write on CI_REPO, used to dispatch workflow runs.
+      CI_DISPATCH_TOKEN: ${CI_DISPATCH_TOKEN:-}
+
+      # Firebase Test Lab free tier: 5 physical-device tests per day.
+      FIREBASE_DAILY_QUOTA: ${FIREBASE_DAILY_QUOTA:-5}
+
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-536870912}
+    volumes:
+      - apprunner-data:/data
+
+volumes:
+  apprunner-data:

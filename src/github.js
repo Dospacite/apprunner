@@ -1,0 +1,124 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
+import config from './config.js';
+import { db, nowIso, newId } from './db.js';
+import { encryptSecret, decryptSecret } from './crypto.js';
+
+const API = 'https://api.github.com';
+
+export class GitHubError extends Error {}
+
+function headers(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'AppRunner',
+  };
+}
+
+async function ghFetch(token, url, init = {}) {
+  const res = await fetch(url.startsWith('http') ? url : `${API}${url}`, {
+    ...init,
+    headers: { ...headers(token), ...(init.headers || {}) },
+  });
+  if (res.status === 401) throw new GitHubError('GitHub rejected the token. It may be expired or revoked.');
+  if (res.status === 403) throw new GitHubError('GitHub denied the request. Check the token has the `repo` scope.');
+  if (res.status === 404) throw new GitHubError('Repository not found, or the token cannot see it.');
+  return res;
+}
+
+export async function verifyToken(token) {
+  const res = await ghFetch(token, '/user');
+  if (!res.ok) throw new GitHubError(`GitHub returned ${res.status} while identifying the token.`);
+  const user = await res.json();
+  return { login: user.login, name: user.name, avatarUrl: user.avatar_url };
+}
+
+export function getUserToken(userId) {
+  const row = db.prepare('SELECT github_token FROM users WHERE id = ?').get(userId);
+  return decryptSecret(row?.github_token);
+}
+
+export function setUserToken(userId, token, login) {
+  db.prepare('UPDATE users SET github_token = ?, github_login = ?, updated_at = ? WHERE id = ?')
+    .run(encryptSecret(token), login || '', nowIso(), userId);
+}
+
+export function clearUserToken(userId) {
+  db.prepare('UPDATE users SET github_token = NULL, github_login = NULL, updated_at = ? WHERE id = ?')
+    .run(nowIso(), userId);
+}
+
+/** Repos the connected account can push to, newest activity first. */
+export async function listRepos(token) {
+  const res = await ghFetch(token, '/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member');
+  if (!res.ok) throw new GitHubError(`GitHub returned ${res.status} while listing repositories.`);
+  const repos = await res.json();
+  return repos.map((r) => ({
+    fullName: r.full_name,
+    private: r.private,
+    defaultBranch: r.default_branch,
+    pushedAt: r.pushed_at,
+    description: r.description || '',
+  }));
+}
+
+export async function getRepo(token, fullName) {
+  const res = await ghFetch(token, `/repos/${fullName}`);
+  if (!res.ok) throw new GitHubError(`GitHub returned ${res.status} for ${fullName}.`);
+  return res.json();
+}
+
+export async function resolveCommit(token, fullName, ref) {
+  const res = await ghFetch(token, `/repos/${fullName}/commits/${encodeURIComponent(ref)}`);
+  if (!res.ok) throw new GitHubError(`Could not resolve ref \`${ref}\` on ${fullName}.`);
+  const commit = await res.json();
+  return { sha: commit.sha, message: (commit.commit?.message || '').split('\n')[0] };
+}
+
+/** Streams the repo tarball to a temp file. Caller owns the file afterwards. */
+export async function downloadTarball(token, fullName, ref) {
+  const url = `${API}/repos/${fullName}/tarball/${encodeURIComponent(ref)}`;
+  const res = await fetch(url, { headers: headers(token), redirect: 'follow' });
+  if (!res.ok) throw new GitHubError(`GitHub returned ${res.status} downloading ${fullName}@${ref}.`);
+
+  fs.mkdirSync(config.tmpDir, { recursive: true });
+  const tmpPath = path.join(config.tmpDir, `gh-${newId()}.tar.gz`);
+  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmpPath));
+  return tmpPath;
+}
+
+/**
+ * Fires the public test repo's workflow. GitHub's dispatch endpoint returns no
+ * run id, so the workflow reports its own id back on first contact.
+ */
+export async function dispatchWorkflow({ runId, projectSlug, skipFirebase }) {
+  const { repo, workflow, ref, dispatchToken } = config.ci;
+  if (!repo) throw new GitHubError('CI_REPO is not configured on the server.');
+  if (!dispatchToken) throw new GitHubError('CI_DISPATCH_TOKEN is not configured on the server.');
+
+  const res = await fetch(`${API}/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
+    method: 'POST',
+    headers: { ...headers(dispatchToken), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ref,
+      inputs: {
+        server_url: config.publicUrl,
+        run_id: runId,
+        project: projectSlug || '',
+        skip_firebase: skipFirebase ? 'true' : 'false',
+      },
+    }),
+  });
+
+  if (res.status === 204) return true;
+  const body = await res.text();
+  throw new GitHubError(`Workflow dispatch failed (${res.status}): ${body.slice(0, 300)}`);
+}
+
+export function ciRepoUrl() {
+  return config.ci.repo ? `https://github.com/${config.ci.repo}` : '';
+}
