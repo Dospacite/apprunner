@@ -22,7 +22,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
       # Public origin — used for the CI callback URLs handed to GitHub Actions.
-      PUBLIC_URL: ${PUBLIC_URL:-https://apprunner.asgard.rousoftware.com}
+      PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL is required — the origin CI calls back to}
 
       # Seeded operator account. Password is read once at first boot.
       ADMIN_USERNAME: ${ADMIN_USERNAME:-ege}
@@ -34,7 +34,7 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
 
       # Public test repository that runs the build/test pipeline.
-      CI_REPO: ${CI_REPO:-Dospacite/apprunner-ci}
+      CI_REPO: ${CI_REPO:?CI_REPO is required — your own fork of the pipeline repository}
       CI_WORKFLOW: ${CI_WORKFLOW:-build-and-test.yml}
       CI_REF: ${CI_REF:-main}
       # Token with actions:write on CI_REPO, used to dispatch workflow runs.

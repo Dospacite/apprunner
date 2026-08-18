@@ -12,14 +12,14 @@ flutter test  →  ios build  →  firebase xctest
 A closed gate stops everything downstream. The interface says so explicitly:
 stages after a failure read *not reached*, never *pending*.
 
-The pipeline itself lives in a separate public repository,
-[apprunner-ci](https://github.com/Dospacite/apprunner-ci), so macOS runners are
-free and no project source is ever public.
+The pipeline lives in a separate public repository so macOS runners are free
+and no project source is ever public. You supply your own copy of it and name
+it in `CI_REPO`.
 
 ## Running it
 
-Deployed on Asgard at `apprunner.asgard.rousoftware.com`. Configuration comes
-from `.env`, which Asgard interpolates into `compose.yaml`:
+Copy `.env.example` to `.env` and fill it in; `compose.yaml` reads it.
+`.env` is gitignored because every value in it is a secret.
 
 | Variable | Meaning |
 | --- | --- |
@@ -64,7 +64,6 @@ under `/data/archives`, build output under `/data/artifacts`.
 
 ## Design
 
-The interface is built on the Cursor design system package in
-`../design-system`. `public/app.css` opens with that package's `:root` token
+The interface is built on a Cursor-derived design system package. `public/app.css` opens with that package's `:root` token
 block pasted verbatim, per its usage contract; every rule after it references
 `var(--token)` and nothing else.
