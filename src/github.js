@@ -20,11 +20,44 @@ function headers(token) {
   };
 }
 
-async function ghFetch(token, url, init = {}) {
-  const res = await fetch(url.startsWith('http') ? url : `${API}${url}`, {
-    ...init,
-    headers: { ...headers(token), ...(init.headers || {}) },
-  });
+/**
+ * Every GitHub call from this host retries, because the route drops requests
+ * intermittently — including small API calls, not just large transfers. A
+ * single `fetch failed` used to abort whatever operation was in flight.
+ */
+async function ghFetch(token, url, init = {}, attempts = 4) {
+  const target = url.startsWith('http') ? url : `${API}${url}`;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(target, {
+        ...init,
+        headers: { ...headers(token), ...(init.headers || {}) },
+        signal: init.signal ?? AbortSignal.timeout(60000),
+      });
+      // A 5xx is worth another try; anything else is the server's real answer.
+      if (res.status >= 500 && attempt < attempts) {
+        lastError = new GitHubError(`GitHub returned ${res.status}.`);
+        log.warn('github call failed, retrying', { url, attempt, status: res.status });
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+      return checkStatus(res);
+    } catch (err) {
+      // checkStatus throws inside the try; those are GitHub's actual answer
+      // (bad token, missing repo) and repeating the call cannot change them.
+      if (err instanceof GitHubError) throw err;
+      lastError = err;
+      log.warn('github call errored, retrying', { url, attempt, error: err.message });
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
+
+  throw new GitHubError(`Could not reach GitHub after ${attempts} attempts: ${lastError?.message}`);
+}
+
+function checkStatus(res) {
   if (res.status === 401) throw new GitHubError('GitHub rejected the token. It may be expired or revoked.');
   if (res.status === 403) throw new GitHubError('GitHub denied the request. Check the token has the `repo` scope.');
   if (res.status === 404) throw new GitHubError('Repository not found, or the token cannot see it.');
