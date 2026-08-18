@@ -21,6 +21,21 @@ it in `CI_REPO`.
 Copy `.env.example` to `.env` and fill it in; `compose.yaml` reads it.
 `.env` is gitignored because every value in it is a secret.
 
+### Rotating a secret
+
+`ADMIN_PASSWORD` is re-applied to the operator account on every boot, so
+changing it in `.env` and redeploying is the whole rotation procedure.
+
+On Asgard specifically, editing the `.env` file is not sufficient: the control
+plane keeps a materialised copy of the service environment, so the new value
+only reaches the container after a `service_config_update` as well. Verify a
+rotation took effect by checking that the *old* password is rejected — a
+deployment that fails while pulling its base image leaves the previous
+container, and its previous secrets, happily running.
+
+Rotating `ENCRYPTION_KEY` makes any stored GitHub token unreadable. Reconnect
+GitHub in Settings afterwards; nothing else is affected.
+
 | Variable | Meaning |
 | --- | --- |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Seeded operator account. The password is re-applied on every boot, so rotating it here is enough. |
