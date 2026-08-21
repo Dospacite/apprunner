@@ -28,8 +28,9 @@ export function createRun({ projectId, archiveId, skipFirebase = false, captureS
 
   const insertRun = db.prepare(
     `INSERT INTO runs
-       (id, project_id, archive_id, number, status, stage, skip_firebase, capture_screenshot, created_at)
-     VALUES (?, ?, ?, ?, 'queued', '', ?, ?, ?)`,
+       (id, project_id, archive_id, number, status, stage, skip_firebase, capture_screenshot,
+        screenshot_status, created_at)
+     VALUES (?, ?, ?, ?, 'queued', '', ?, ?, ?, ?)`,
   );
   const insertStage = db.prepare(
     `INSERT INTO run_stages (id, run_id, key, position, status) VALUES (?, ?, ?, ?, ?)`,
@@ -43,6 +44,7 @@ export function createRun({ projectId, archiveId, skipFirebase = false, captureS
       number,
       skipFirebase ? 1 : 0,
       captureScreenshot ? 1 : 0,
+      captureScreenshot ? 'pending' : 'not_requested',
       nowIso(),
     );
     STAGES.forEach((stage, index) => {
@@ -163,6 +165,77 @@ export function getLog(logId) {
 
 export function getArtifacts(runId) {
   return db.prepare('SELECT * FROM artifacts WHERE run_id = ? ORDER BY created_at').all(runId);
+}
+
+export function getScreenshots(runId) {
+  const run = getRun(runId);
+  if (!run) return null;
+  const rows = db.prepare(
+    `SELECT id, filename, screenshot_name, screenshot_ordinal, size_bytes, sha256
+       FROM artifacts
+      WHERE run_id = ? AND kind = 'screenshot'
+      ORDER BY screenshot_ordinal, screenshot_name`,
+  ).all(runId);
+  return {
+    status: run.screenshot_status,
+    error: run.screenshot_error || null,
+    startedAt: run.screenshot_started_at,
+    finishedAt: run.screenshot_finished_at,
+    items: rows.map((row) => ({
+      artifactId: row.id,
+      name: row.screenshot_name || row.filename.replace(/\.png$/i, ''),
+      ordinal: row.screenshot_ordinal,
+      filename: row.filename,
+      sizeBytes: row.size_bytes,
+      sha256: row.sha256,
+    })),
+  };
+}
+
+export function beginScreenshotIngestion(runId) {
+  const stamp = nowIso();
+  const result = db.prepare(
+    `UPDATE runs
+        SET screenshot_status = 'ingesting', screenshot_error = '',
+            screenshot_started_at = ?, screenshot_finished_at = NULL
+      WHERE id = ? AND capture_screenshot = 1 AND screenshot_status IN ('pending', 'failed')`,
+  ).run(stamp, runId);
+  return { claimed: result.changes === 1, screenshots: getScreenshots(runId) };
+}
+
+export function completeScreenshotIngestion(runId, artifacts) {
+  const stamp = nowIso();
+  db.transaction(() => {
+    const run = getRun(runId);
+    if (!run || run.screenshot_status !== 'ingesting') {
+      throw new Error('Screenshot ingestion is no longer active.');
+    }
+    const insert = db.prepare(
+      `INSERT INTO artifacts
+         (id, run_id, kind, filename, storage_path, size_bytes, sha256,
+          screenshot_name, screenshot_ordinal, created_at)
+       VALUES (?, ?, 'screenshot', ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const artifact of artifacts) {
+      insert.run(
+        artifact.id, runId, artifact.filename, artifact.storagePath,
+        artifact.sizeBytes, artifact.sha256, artifact.name, artifact.ordinal, stamp,
+      );
+    }
+    db.prepare(
+      `UPDATE runs SET screenshot_status = 'ready', screenshot_error = '', screenshot_finished_at = ?
+        WHERE id = ?`,
+    ).run(stamp, runId);
+  })();
+  return getScreenshots(runId);
+}
+
+export function failScreenshotIngestion(runId, message) {
+  db.prepare(
+    `UPDATE runs SET screenshot_status = 'failed', screenshot_error = ?, screenshot_finished_at = ?
+      WHERE id = ? AND screenshot_status = 'ingesting'`,
+  ).run(String(message).slice(0, 1000), nowIso(), runId);
+  return getScreenshots(runId);
 }
 
 export function listRuns(projectId, limit = 25) {

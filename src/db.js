@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS runs (
   summary       TEXT NOT NULL DEFAULT '',
   skip_firebase INTEGER NOT NULL DEFAULT 0,
   capture_screenshot INTEGER NOT NULL DEFAULT 0,
+  screenshot_status TEXT NOT NULL DEFAULT 'not_requested',
+  screenshot_error TEXT NOT NULL DEFAULT '',
+  screenshot_started_at TEXT,
+  screenshot_finished_at TEXT,
   gh_run_id     TEXT NOT NULL DEFAULT '',
   gh_run_url    TEXT NOT NULL DEFAULT '',
   created_at    TEXT NOT NULL,
@@ -114,6 +118,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
   storage_path TEXT NOT NULL,
   size_bytes   INTEGER NOT NULL,
   sha256       TEXT NOT NULL,
+  screenshot_name TEXT NOT NULL DEFAULT '',
+  screenshot_ordinal INTEGER NOT NULL DEFAULT -1,
   created_at   TEXT NOT NULL
 );
 
@@ -152,9 +158,10 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
  */
 function addColumn(table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (columns.some((c) => c.name === column)) return;
+  if (columns.some((c) => c.name === column)) return false;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   log.info('migration: column added', { table, column });
+  return true;
 }
 
 // `ci` keys reach only the archives and run reporting the pipeline needs.
@@ -162,6 +169,42 @@ function addColumn(table, column, definition) {
 // much authority to leave sitting in a public repository's secrets.
 addColumn('ci_keys', 'kind', "TEXT NOT NULL DEFAULT 'ci'");
 addColumn('runs', 'capture_screenshot', 'INTEGER NOT NULL DEFAULT 0');
+const addedScreenshotStatus = addColumn(
+  'runs', 'screenshot_status', "TEXT NOT NULL DEFAULT 'not_requested'",
+);
+addColumn('runs', 'screenshot_error', "TEXT NOT NULL DEFAULT ''");
+addColumn('runs', 'screenshot_started_at', 'TEXT');
+addColumn('runs', 'screenshot_finished_at', 'TEXT');
+const addedScreenshotName = addColumn('artifacts', 'screenshot_name', "TEXT NOT NULL DEFAULT ''");
+const addedScreenshotOrdinal = addColumn('artifacts', 'screenshot_ordinal', 'INTEGER NOT NULL DEFAULT -1');
+
+if (addedScreenshotName || addedScreenshotOrdinal) {
+  db.exec(`
+    UPDATE artifacts
+       SET screenshot_name = CASE
+         WHEN filename LIKE '%.png' THEN substr(filename, 1, length(filename) - 4)
+         ELSE filename
+       END,
+           screenshot_ordinal = 0
+     WHERE kind = 'screenshot';
+  `);
+}
+if (addedScreenshotStatus) {
+  db.exec(`
+    UPDATE runs
+       SET screenshot_status = CASE
+         WHEN EXISTS (SELECT 1 FROM artifacts WHERE artifacts.run_id = runs.id AND kind = 'screenshot') THEN 'ready'
+         WHEN status IN ('passed', 'failed', 'error', 'cancelled') THEN 'failed'
+         ELSE 'pending'
+       END
+     WHERE capture_screenshot = 1;
+  `);
+}
+
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_screenshot_name
+    ON artifacts(run_id, screenshot_name) WHERE kind = 'screenshot';
+`);
 
 export const nowIso = () => new Date().toISOString();
 export const newId = () => crypto.randomUUID();

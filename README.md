@@ -68,7 +68,8 @@ one operator's projects and nothing else.
 | `POST /api/v1/ci/runs/:id/stage` | Move one gate to running, passed, failed, or skipped. |
 | `POST /api/v1/ci/runs/:id/events` | Append a progress line. |
 | `POST /api/v1/ci/runs/:id/logs` | Upload a build log. |
-| `POST /api/v1/ci/runs/:id/artifacts` | Upload build and screenshot artifacts. |
+| `POST /api/v1/ci/runs/:id/artifacts` | Upload build artifacts. |
+| `POST /api/v1/ci/runs/:id/artifacts/from-github` | Pull a build artifact or an atomic named screenshot set from Actions. |
 | `POST /api/v1/ci/runs/:id/finish` | Close the run. |
 
 `resolve` and `archive` accept `?project=<slug>` for a specific project,

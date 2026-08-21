@@ -11,8 +11,10 @@ import { findProject, getProject } from '../projects.js';
 import { latestArchive, latestArchiveForUser, sha256Of } from '../archives.js';
 import {
   getRun, getStages, updateStage, addEvent, addLog, finishRun,
-  markRunStarted, STAGE_KEYS, isTerminal,
+  markRunStarted, beginScreenshotIngestion, completeScreenshotIngestion,
+  failScreenshotIngestion, STAGE_KEYS, isTerminal,
 } from '../runs.js';
+import { validateScreenshotBundle } from '../screenshots.js';
 import * as github from '../github.js';
 import { log } from '../log.js';
 
@@ -283,15 +285,67 @@ ciRouter.post('/runs/:runId/artifacts/from-github', (req, res) => {
     return res.status(400).json({ error: 'github_run_id and name are required.' });
   }
 
+  if (kind === 'screenshot') {
+    const claim = beginScreenshotIngestion(run.id);
+    if (!claim.claimed) {
+      const status = claim.screenshots?.status;
+      const code = status === 'ready' ? 200 : status === 'ingesting' ? 202 : 409;
+      return res.status(code).json({ ok: code !== 409, screenshots: claim.screenshots });
+    }
+  }
+
   res.status(202).json({ ok: true, fetching: { githubRunId: String(ghRunId), name } });
 
   // Deliberately not awaited: the response is already sent.
-  ingestGithubArtifact(run, { ghRunId: String(ghRunId), name, kind, filename })
+  const ingest = kind === 'screenshot' ? ingestGithubScreenshots : ingestGithubArtifact;
+  ingest(run, { ghRunId: String(ghRunId), name, kind, filename })
     .catch((err) => {
       log.error('github artifact ingest failed', { runId: run.id, error: err.message });
       addEvent(run.id, kind, 'error', `Could not fetch ${name} from GitHub: ${err.message}`);
+      if (kind === 'screenshot') failScreenshotIngestion(run.id, err.message);
     });
 });
+
+async function ingestGithubScreenshots(run, { ghRunId, name }) {
+  const started = Date.now();
+  const { zipPath } = await github.downloadWorkflowArtifact({ runId: ghRunId, name });
+  const workDir = path.join(config.tmpDir, `gha-screenshots-${newId()}`);
+  const moved = [];
+  let committed = false;
+  try {
+    await fs.promises.mkdir(workDir, { recursive: true });
+    await execFileAsync('unzip', ['-qq', '-o', zipPath, '-d', workDir]);
+    const screenshots = await validateScreenshotBundle(workDir, sha256Of);
+    const dir = path.join(config.artifactDir, run.id);
+    await fs.promises.mkdir(dir, { recursive: true });
+
+    const artifacts = [];
+    for (const screenshot of screenshots) {
+      const id = newId();
+      const storagePath = path.join(dir, `${id}-${screenshot.filename}`);
+      await fs.promises.rename(screenshot.sourcePath, storagePath);
+      moved.push(storagePath);
+      artifacts.push({ id, storagePath, ...screenshot });
+    }
+    completeScreenshotIngestion(run.id, artifacts);
+    committed = true;
+    const seconds = ((Date.now() - started) / 1000).toFixed(1);
+    try {
+      addEvent(run.id, 'screenshot', 'success', `Pulled ${artifacts.length} screenshots from GitHub in ${seconds}s.`);
+    } catch (err) {
+      log.warn('could not record screenshot ingest event', { runId: run.id, error: err.message });
+    }
+    log.info('github screenshots ingested', { runId: run.id, count: artifacts.length, seconds });
+  } catch (err) {
+    if (!committed) {
+      await Promise.all(moved.map((file) => fs.promises.rm(file, { force: true }).catch(() => {})));
+    }
+    throw err;
+  } finally {
+    await fs.promises.rm(zipPath, { force: true }).catch(() => {});
+    await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 async function ingestGithubArtifact(run, { ghRunId, name, kind, filename }) {
   const started = Date.now();

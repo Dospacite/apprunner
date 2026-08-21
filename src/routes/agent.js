@@ -10,7 +10,7 @@ import {
 import { storeArchive, latestArchive, ArchiveError } from '../archives.js';
 import {
   createRun, getRun, getStages, getEvents, getLogs, getLog,
-  getArtifacts, listRuns, activeRun, firebaseUsageToday, finishRun, addEvent, isTerminal,
+  getArtifacts, getScreenshots, listRuns, activeRun, firebaseUsageToday, finishRun, addEvent, isTerminal,
 } from '../runs.js';
 import * as github from '../github.js';
 import { log } from '../log.js';
@@ -54,6 +54,7 @@ function serializeRun(run) {
     failedStage: run.failed_stage || null,
     summary: run.summary,
     captureScreenshot: Boolean(run.capture_screenshot),
+    screenshots: getScreenshots(run.id),
     done: isTerminal(run.status),
     githubRunUrl: run.gh_run_url || null,
     createdAt: run.created_at,
@@ -281,6 +282,8 @@ agentRouter.get('/runs/:runId', (req, res) => {
     logs: getLogs(run.id).map((l) => ({ id: l.id, stage: l.stage, name: l.name, sizeBytes: l.size })),
     artifacts: getArtifacts(run.id).map((a) => ({
       id: a.id, kind: a.kind, filename: a.filename, sizeBytes: a.size_bytes, sha256: a.sha256,
+      name: a.kind === 'screenshot' ? (a.screenshot_name || a.filename.replace(/\.png$/i, '')) : undefined,
+      ordinal: a.kind === 'screenshot' ? a.screenshot_ordinal : undefined,
     })),
   });
 });
