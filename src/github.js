@@ -134,7 +134,13 @@ export async function downloadTarball(token, fullName, ref) {
  * unreliable from some hosts: a single transient `fetch failed` would
  * otherwise strand a run in `error` with nothing actually wrong.
  */
-export async function dispatchWorkflow({ runId, projectSlug, skipFirebase, attempts = 4 }) {
+export async function dispatchWorkflow({
+  runId,
+  projectSlug,
+  skipFirebase,
+  captureScreenshot = false,
+  attempts = 4,
+}) {
   const { repo, workflow, ref, dispatchToken } = config.ci;
   if (!repo) throw new GitHubError('CI_REPO is not configured on the server.');
   if (!dispatchToken) throw new GitHubError('CI_DISPATCH_TOKEN is not configured on the server.');
@@ -146,6 +152,7 @@ export async function dispatchWorkflow({ runId, projectSlug, skipFirebase, attem
       run_id: runId,
       project: projectSlug || '',
       skip_firebase: skipFirebase ? 'true' : 'false',
+      capture_screenshot: captureScreenshot ? 'true' : 'false',
     },
   });
 

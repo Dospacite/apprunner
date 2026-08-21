@@ -64,6 +64,10 @@ export function projectPage({
         )}
         <form method="post" action="/projects/${project.id}/runs" class="stack-3">
           <label class="row-wrap body-sm body-muted" style="gap: var(--space-2)">
+            <input type="checkbox" name="capture_screenshot" value="1" style="width: auto">
+            Capture the launched app on an iOS simulator
+          </label>
+          <label class="row-wrap body-sm body-muted" style="gap: var(--space-2)">
             <input type="checkbox" name="skip_firebase" value="1" style="width: auto"
                    ${firebase.used >= firebase.quota ? 'checked' : ''}>
             Skip the Firebase stage

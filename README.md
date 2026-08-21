@@ -12,6 +12,9 @@ flutter test  →  ios build  →  firebase xctest
 A closed gate stops everything downstream. The interface says so explicitly:
 stages after a failure read *not reached*, never *pending*.
 
+Runs can also launch the built app on an iOS simulator and capture its first
+screen. AppRunner stores the PNG with the run and previews it in the browser.
+
 The pipeline lives in a separate public repository so macOS runners are free
 and no project source is ever public. You supply your own copy of it and name
 it in `CI_REPO`.
@@ -65,7 +68,7 @@ one operator's projects and nothing else.
 | `POST /api/v1/ci/runs/:id/stage` | Move one gate to running, passed, failed, or skipped. |
 | `POST /api/v1/ci/runs/:id/events` | Append a progress line. |
 | `POST /api/v1/ci/runs/:id/logs` | Upload a build log. |
-| `POST /api/v1/ci/runs/:id/artifacts` | Upload the built application. |
+| `POST /api/v1/ci/runs/:id/artifacts` | Upload build and screenshot artifacts. |
 | `POST /api/v1/ci/runs/:id/finish` | Close the run. |
 
 `resolve` and `archive` accept `?project=<slug>` for a specific project,

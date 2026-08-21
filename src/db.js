@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS runs (
   failed_stage  TEXT NOT NULL DEFAULT '',
   summary       TEXT NOT NULL DEFAULT '',
   skip_firebase INTEGER NOT NULL DEFAULT 0,
+  capture_screenshot INTEGER NOT NULL DEFAULT 0,
   gh_run_id     TEXT NOT NULL DEFAULT '',
   gh_run_url    TEXT NOT NULL DEFAULT '',
   created_at    TEXT NOT NULL,
@@ -160,6 +161,7 @@ function addColumn(table, column, definition) {
 // `agent` keys can also create projects, upload archives, and start runs — too
 // much authority to leave sitting in a public repository's secrets.
 addColumn('ci_keys', 'kind', "TEXT NOT NULL DEFAULT 'ci'");
+addColumn('runs', 'capture_screenshot', 'INTEGER NOT NULL DEFAULT 0');
 
 export const nowIso = () => new Date().toISOString();
 export const newId = () => crypto.randomUUID();

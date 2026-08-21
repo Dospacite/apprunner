@@ -53,6 +53,7 @@ function serializeRun(run) {
     stage: run.stage,
     failedStage: run.failed_stage || null,
     summary: run.summary,
+    captureScreenshot: Boolean(run.capture_screenshot),
     done: isTerminal(run.status),
     githubRunUrl: run.gh_run_url || null,
     createdAt: run.created_at,
@@ -239,14 +240,25 @@ agentRouter.post('/projects/:ref/runs', async (req, res) => {
 
   const quota = firebaseUsageToday(req.user.id);
   const skipFirebase = Boolean(req.body.skipFirebase) || quota.used >= quota.quota;
+  const captureScreenshot = Boolean(req.body.captureScreenshot);
 
-  const run = createRun({ projectId: project.id, archiveId: latest.id, skipFirebase });
+  const run = createRun({
+    projectId: project.id,
+    archiveId: latest.id,
+    skipFirebase,
+    captureScreenshot,
+  });
   if (skipFirebase && quota.used >= quota.quota) {
     addEvent(run.id, 'firebase_test', 'warn', `Firebase stage skipped: daily limit reached (${quota.used}/${quota.quota}).`);
   }
 
   try {
-    await github.dispatchWorkflow({ runId: run.id, projectSlug: project.slug, skipFirebase });
+    await github.dispatchWorkflow({
+      runId: run.id,
+      projectSlug: project.slug,
+      skipFirebase,
+      captureScreenshot,
+    });
     addEvent(run.id, '', 'info', `Dispatched ${config.ci.repo} · ${config.ci.workflow} on ${config.ci.ref}.`);
   } catch (err) {
     log.error('agent dispatch failed', { runId: run.id, error: err.message });

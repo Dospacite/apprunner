@@ -313,14 +313,25 @@ pagesRouter.post('/projects/:id/runs', async (req, res) => {
 
   const quota = firebaseUsageToday(req.user.id);
   const skipFirebase = req.body.skip_firebase === '1' || quota.used >= quota.quota;
+  const captureScreenshot = req.body.capture_screenshot === '1';
 
-  const run = createRun({ projectId: project.id, archiveId: latest.id, skipFirebase });
+  const run = createRun({
+    projectId: project.id,
+    archiveId: latest.id,
+    skipFirebase,
+    captureScreenshot,
+  });
   if (skipFirebase && quota.used >= quota.quota) {
     addEvent(run.id, 'firebase_test', 'warn', `Firebase stage skipped: daily limit reached (${quota.used}/${quota.quota}).`);
   }
 
   try {
-    await github.dispatchWorkflow({ runId: run.id, projectSlug: project.slug, skipFirebase });
+    await github.dispatchWorkflow({
+      runId: run.id,
+      projectSlug: project.slug,
+      skipFirebase,
+      captureScreenshot,
+    });
     addEvent(run.id, '', 'info', `Dispatched ${config.ci.repo} · ${config.ci.workflow} on ${config.ci.ref}.`);
     res.flash('success', `Run #${run.number} dispatched.`);
   } catch (err) {
@@ -369,6 +380,9 @@ pagesRouter.get('/projects/:id/runs/:number/artifacts/:artifactId', (req, res) =
   const artifact = db.prepare('SELECT * FROM artifacts WHERE id = ? AND run_id = ?').get(req.params.artifactId, run.id);
   if (!artifact || !fs.existsSync(artifact.storage_path)) return res.status(404).send('Artifact not found.');
 
+  if (req.query.inline === '1' && artifact.kind === 'screenshot') {
+    return res.type('png').sendFile(artifact.storage_path);
+  }
   res.download(artifact.storage_path, artifact.filename);
 });
 

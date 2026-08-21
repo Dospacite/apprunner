@@ -108,6 +108,7 @@ ciRouter.get('/resolve', (req, res) => {
       number: target.run.number,
       status: target.run.status,
       skipFirebase: Boolean(target.run.skip_firebase),
+      captureScreenshot: Boolean(target.run.capture_screenshot),
     };
   }
   res.json(payload);
@@ -161,6 +162,7 @@ ciRouter.get('/runs/:runId', (req, res) => {
     run: {
       id: run.id, number: run.number, status: run.status, stage: run.stage,
       skipFirebase: Boolean(run.skip_firebase),
+      captureScreenshot: Boolean(run.capture_screenshot),
     },
     project: { id: req.project.id, slug: req.project.slug, name: req.project.name },
     stages: getStages(run.id).map((s) => ({ key: s.key, status: s.status, detail: s.detail })),

@@ -22,20 +22,29 @@ function nextNumber(projectId) {
   return (row?.n || 0) + 1;
 }
 
-export function createRun({ projectId, archiveId, skipFirebase = false }) {
+export function createRun({ projectId, archiveId, skipFirebase = false, captureScreenshot = false }) {
   const id = newId();
   const number = nextNumber(projectId);
 
   const insertRun = db.prepare(
-    `INSERT INTO runs (id, project_id, archive_id, number, status, stage, skip_firebase, created_at)
-     VALUES (?, ?, ?, ?, 'queued', '', ?, ?)`,
+    `INSERT INTO runs
+       (id, project_id, archive_id, number, status, stage, skip_firebase, capture_screenshot, created_at)
+     VALUES (?, ?, ?, ?, 'queued', '', ?, ?, ?)`,
   );
   const insertStage = db.prepare(
     `INSERT INTO run_stages (id, run_id, key, position, status) VALUES (?, ?, ?, ?, ?)`,
   );
 
   db.transaction(() => {
-    insertRun.run(id, projectId, archiveId, number, skipFirebase ? 1 : 0, nowIso());
+    insertRun.run(
+      id,
+      projectId,
+      archiveId,
+      number,
+      skipFirebase ? 1 : 0,
+      captureScreenshot ? 1 : 0,
+      nowIso(),
+    );
     STAGES.forEach((stage, index) => {
       const status = stage.key === 'firebase_test' && skipFirebase ? 'skipped' : 'pending';
       insertStage.run(newId(), id, stage.key, index, status);

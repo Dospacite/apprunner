@@ -9,6 +9,7 @@ function eventRow(event) {
 
 export function runPage({ user, project, run, stages, events, logs, artifacts, activeLog, flash }) {
   const live = run.status === 'queued' || run.status === 'running';
+  const screenshots = artifacts.filter((artifact) => artifact.kind === 'screenshot');
 
   const logTabs = logs.length
     ? html`<div class="row-wrap">${raw(logs.map((l) => {
@@ -57,6 +58,17 @@ export function runPage({ user, project, run, stages, events, logs, artifacts, a
 
           <div class="card card-flat">
             <h3>Downloads</h3>
+            ${screenshots.length ? html`
+              <div class="stack-3">
+                ${raw(screenshots.map((screenshot) => html`
+                  <a href="/projects/${project.id}/runs/${run.number}/artifacts/${screenshot.id}">
+                    <img
+                      src="/projects/${project.id}/runs/${run.number}/artifacts/${screenshot.id}?inline=1"
+                      alt="Captured iOS app screen"
+                      style="display: block; width: min(100%, 390px); height: auto; border-radius: var(--radius-md); border: 1px solid var(--line)"
+                    >
+                  </a>`.value).join(''))}
+              </div>` : raw('')}
             ${artifacts.length ? html`
               <div class="table-scroll">
                 <table class="table">
