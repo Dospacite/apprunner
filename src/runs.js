@@ -123,6 +123,12 @@ export function updateStage(runId, key, status, detail = '') {
       ).run(runId, position);
       db.prepare("UPDATE runs SET status = 'failed', failed_stage = ?, summary = ?, finished_at = ? WHERE id = ?")
         .run(key, detail || `${key} failed.`, stamp, runId);
+      if (run.capture_screenshot && key === 'ios_build') {
+        db.prepare(
+          `UPDATE runs SET screenshot_status = 'failed', screenshot_error = ?, screenshot_finished_at = ?
+            WHERE id = ? AND screenshot_status = 'pending'`,
+        ).run(detail || 'The iOS screenshot journey failed.', stamp, runId);
+      }
     }
   })();
 
@@ -143,6 +149,12 @@ export function finishRun(runId, { status, summary = '' }) {
     ).run(runId);
     db.prepare('UPDATE runs SET status = ?, summary = ?, finished_at = ? WHERE id = ?')
       .run(status, summary, stamp, runId);
+    if (run.capture_screenshot && status !== 'passed') {
+      db.prepare(
+        `UPDATE runs SET screenshot_status = 'failed', screenshot_error = ?, screenshot_finished_at = ?
+          WHERE id = ? AND screenshot_status = 'pending'`,
+      ).run(summary || `Run ${status} before screenshots were available.`, stamp, runId);
+    }
   })();
 
   return getRun(runId);
