@@ -35,5 +35,5 @@ USER node
 EXPOSE 8080
 
 # tini reaps zombies and forwards SIGTERM so the graceful shutdown path runs.
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "src/index.js"]
