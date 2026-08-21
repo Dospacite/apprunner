@@ -1,5 +1,6 @@
 import config from './config.js';
 import { db, newId, nowIso } from './db.js';
+import { normalizeScreenshotPhones, screenshotPhoneRecords } from './screenshot-phones.js';
 
 /**
  * The pipeline is a strict gate sequence: each stage only starts if every
@@ -22,15 +23,18 @@ function nextNumber(projectId) {
   return (row?.n || 0) + 1;
 }
 
-export function createRun({ projectId, archiveId, skipFirebase = false, captureScreenshot = false }) {
+export function createRun({
+  projectId, archiveId, skipFirebase = false, captureScreenshot = false, screenshotPhones,
+}) {
   const id = newId();
   const number = nextNumber(projectId);
+  const phones = captureScreenshot ? normalizeScreenshotPhones(screenshotPhones) : [];
 
   const insertRun = db.prepare(
     `INSERT INTO runs
        (id, project_id, archive_id, number, status, stage, skip_firebase, capture_screenshot,
-        screenshot_status, created_at)
-     VALUES (?, ?, ?, ?, 'queued', '', ?, ?, ?, ?)`,
+        screenshot_status, screenshot_phones_json, created_at)
+     VALUES (?, ?, ?, ?, 'queued', '', ?, ?, ?, ?, ?)`,
   );
   const insertStage = db.prepare(
     `INSERT INTO run_stages (id, run_id, key, position, status) VALUES (?, ?, ?, ?, ?)`,
@@ -45,6 +49,7 @@ export function createRun({ projectId, archiveId, skipFirebase = false, captureS
       skipFirebase ? 1 : 0,
       captureScreenshot ? 1 : 0,
       captureScreenshot ? 'pending' : 'not_requested',
+      JSON.stringify(phones),
       nowIso(),
     );
     STAGES.forEach((stage, index) => {
@@ -183,24 +188,51 @@ export function getScreenshots(runId) {
   const run = getRun(runId);
   if (!run) return null;
   const rows = db.prepare(
-    `SELECT id, filename, screenshot_name, screenshot_ordinal, size_bytes, sha256
+    `SELECT id, filename, screenshot_name, screenshot_ordinal, size_bytes, sha256,
+            screenshot_phone_key, screenshot_phone_ordinal, screenshot_model, screenshot_runtime,
+            screenshot_width_pixels, screenshot_height_pixels
        FROM artifacts
       WHERE run_id = ? AND kind = 'screenshot'
-      ORDER BY screenshot_ordinal, screenshot_name`,
+      ORDER BY screenshot_phone_ordinal, screenshot_ordinal, screenshot_name`,
   ).all(runId);
+  let requestedPhones = [];
+  try {
+    requestedPhones = JSON.parse(run.screenshot_phones_json || '[]');
+  } catch {
+    requestedPhones = [];
+  }
+  if (run.capture_screenshot && !requestedPhones.length) requestedPhones = ['default'];
+  const records = screenshotPhoneRecords(requestedPhones);
+  const items = rows.map((row) => ({
+    artifactId: row.id,
+    phone: row.screenshot_phone_key || 'default',
+    phoneOrdinal: row.screenshot_phone_ordinal,
+    name: row.screenshot_name || row.filename.replace(/\.png$/i, ''),
+    ordinal: row.screenshot_ordinal,
+    filename: row.filename,
+    widthPixels: row.screenshot_width_pixels,
+    heightPixels: row.screenshot_height_pixels,
+    sizeBytes: row.size_bytes,
+    sha256: row.sha256,
+  }));
   return {
     status: run.screenshot_status,
     error: run.screenshot_error || null,
     startedAt: run.screenshot_started_at,
     finishedAt: run.screenshot_finished_at,
-    items: rows.map((row) => ({
-      artifactId: row.id,
-      name: row.screenshot_name || row.filename.replace(/\.png$/i, ''),
-      ordinal: row.screenshot_ordinal,
-      filename: row.filename,
-      sizeBytes: row.size_bytes,
-      sha256: row.sha256,
-    })),
+    requestedPhones,
+    phones: records.map((record) => {
+      const phoneItems = items.filter((item) => item.phone === record.key);
+      const row = rows.find((candidate) => candidate.screenshot_phone_key === record.key);
+      return {
+        key: record.key,
+        ordinal: record.ordinal,
+        requested: record.requested,
+        resolved: row?.screenshot_model ? { model: row.screenshot_model, runtime: row.screenshot_runtime } : null,
+        images: phoneItems,
+      };
+    }),
+    items,
   };
 }
 
@@ -225,13 +257,16 @@ export function completeScreenshotIngestion(runId, artifacts) {
     const insert = db.prepare(
       `INSERT INTO artifacts
          (id, run_id, kind, filename, storage_path, size_bytes, sha256,
-          screenshot_name, screenshot_ordinal, created_at)
-       VALUES (?, ?, 'screenshot', ?, ?, ?, ?, ?, ?, ?)`,
+          screenshot_name, screenshot_ordinal, screenshot_phone_key, screenshot_phone_ordinal,
+          screenshot_model, screenshot_runtime, screenshot_width_pixels, screenshot_height_pixels, created_at)
+       VALUES (?, ?, 'screenshot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const artifact of artifacts) {
       insert.run(
         artifact.id, runId, artifact.filename, artifact.storagePath,
-        artifact.sizeBytes, artifact.sha256, artifact.name, artifact.ordinal, stamp,
+        artifact.sizeBytes, artifact.sha256, artifact.name, artifact.ordinal,
+        artifact.phoneKey, artifact.phoneOrdinal, artifact.resolved?.model || '',
+        artifact.resolved?.runtime || '', artifact.widthPixels, artifact.heightPixels, stamp,
       );
     }
     db.prepare(

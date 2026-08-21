@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS runs (
   screenshot_error TEXT NOT NULL DEFAULT '',
   screenshot_started_at TEXT,
   screenshot_finished_at TEXT,
+  screenshot_phones_json TEXT NOT NULL DEFAULT '[]',
   gh_run_id     TEXT NOT NULL DEFAULT '',
   gh_run_url    TEXT NOT NULL DEFAULT '',
   created_at    TEXT NOT NULL,
@@ -120,6 +121,12 @@ CREATE TABLE IF NOT EXISTS artifacts (
   sha256       TEXT NOT NULL,
   screenshot_name TEXT NOT NULL DEFAULT '',
   screenshot_ordinal INTEGER NOT NULL DEFAULT -1,
+  screenshot_phone_key TEXT NOT NULL DEFAULT 'default',
+  screenshot_phone_ordinal INTEGER NOT NULL DEFAULT 0,
+  screenshot_model TEXT NOT NULL DEFAULT '',
+  screenshot_runtime TEXT NOT NULL DEFAULT '',
+  screenshot_width_pixels INTEGER,
+  screenshot_height_pixels INTEGER,
   created_at   TEXT NOT NULL
 );
 
@@ -175,8 +182,15 @@ const addedScreenshotStatus = addColumn(
 addColumn('runs', 'screenshot_error', "TEXT NOT NULL DEFAULT ''");
 addColumn('runs', 'screenshot_started_at', 'TEXT');
 addColumn('runs', 'screenshot_finished_at', 'TEXT');
+addColumn('runs', 'screenshot_phones_json', "TEXT NOT NULL DEFAULT '[]'");
 const addedScreenshotName = addColumn('artifacts', 'screenshot_name', "TEXT NOT NULL DEFAULT ''");
 const addedScreenshotOrdinal = addColumn('artifacts', 'screenshot_ordinal', 'INTEGER NOT NULL DEFAULT -1');
+addColumn('artifacts', 'screenshot_phone_key', "TEXT NOT NULL DEFAULT 'default'");
+addColumn('artifacts', 'screenshot_phone_ordinal', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('artifacts', 'screenshot_model', "TEXT NOT NULL DEFAULT ''");
+addColumn('artifacts', 'screenshot_runtime', "TEXT NOT NULL DEFAULT ''");
+addColumn('artifacts', 'screenshot_width_pixels', 'INTEGER');
+addColumn('artifacts', 'screenshot_height_pixels', 'INTEGER');
 
 if (addedScreenshotName || addedScreenshotOrdinal) {
   db.exec(`
@@ -200,10 +214,12 @@ if (addedScreenshotStatus) {
      WHERE capture_screenshot = 1;
   `);
 }
+db.exec(`UPDATE runs SET screenshot_phones_json = '["default"]' WHERE capture_screenshot = 1 AND screenshot_phones_json = '[]';`);
 
 db.exec(`
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_screenshot_name
-    ON artifacts(run_id, screenshot_name) WHERE kind = 'screenshot';
+  DROP INDEX IF EXISTS idx_artifacts_screenshot_name;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_screenshot_phone_name
+    ON artifacts(run_id, screenshot_phone_key, screenshot_name) WHERE kind = 'screenshot';
 `);
 
 export const nowIso = () => new Date().toISOString();

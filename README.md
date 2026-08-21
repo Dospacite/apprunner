@@ -76,6 +76,12 @@ one operator's projects and nothing else.
 `?run=<id>` for a run's pinned archive, or nothing at all — which returns the
 newest archive the key's owner has uploaded.
 
+Screenshot runs persist an ordered phone request. Presets `compact`, `standard`,
+and `large` resolve on the macOS runner; structured exact selectors reproduce a
+specific model and optional iOS major/minor version. The screenshot summary
+groups app-owned state names by phone and reports the resolved model, runtime,
+and measured PNG dimensions.
+
 ## Data
 
 Everything lives on one volume: SQLite at `/data/apprunner.sqlite`, archives

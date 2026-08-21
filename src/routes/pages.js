@@ -13,7 +13,7 @@ import {
 } from '../archives.js';
 import {
   createRun, getRunByNumber, getStages, getEvents, getLogs, getLog,
-  getArtifacts, listRuns, activeRun, firebaseUsageToday, isTerminal, finishRun, addEvent,
+  getArtifacts, getScreenshots, listRuns, activeRun, firebaseUsageToday, isTerminal, finishRun, addEvent,
 } from '../runs.js';
 import * as github from '../github.js';
 import { loginPage } from '../views/login.js';
@@ -23,6 +23,7 @@ import { runPage } from '../views/run.js';
 import { settingsPage } from '../views/settings.js';
 import { pipelineRail } from '../views/rail.js';
 import { log } from '../log.js';
+import { normalizeScreenshotPhones } from '../screenshot-phones.js';
 
 const upload = multer({ dest: config.tmpDir, limits: { fileSize: config.maxUploadBytes } });
 
@@ -314,12 +315,23 @@ pagesRouter.post('/projects/:id/runs', async (req, res) => {
   const quota = firebaseUsageToday(req.user.id);
   const skipFirebase = req.body.skip_firebase === '1' || quota.used >= quota.quota;
   const captureScreenshot = req.body.capture_screenshot === '1';
+  let screenshotPhones = [];
+  try {
+    const selected = req.body.screenshot_phones;
+    screenshotPhones = captureScreenshot
+      ? normalizeScreenshotPhones(selected === undefined ? undefined : Array.isArray(selected) ? selected : [selected])
+      : [];
+  } catch (err) {
+    res.flash('error', err.message);
+    return res.redirect(`/projects/${project.id}`);
+  }
 
   const run = createRun({
     projectId: project.id,
     archiveId: latest.id,
     skipFirebase,
     captureScreenshot,
+    screenshotPhones,
   });
   if (skipFirebase && quota.used >= quota.quota) {
     addEvent(run.id, 'firebase_test', 'warn', `Firebase stage skipped: daily limit reached (${quota.used}/${quota.quota}).`);
@@ -331,6 +343,7 @@ pagesRouter.post('/projects/:id/runs', async (req, res) => {
       projectSlug: project.slug,
       skipFirebase,
       captureScreenshot,
+      screenshotPhones,
     });
     addEvent(run.id, '', 'info', `Dispatched ${config.ci.repo} · ${config.ci.workflow} on ${config.ci.ref}.`);
     res.flash('success', `Run #${run.number} dispatched.`);
@@ -365,6 +378,7 @@ pagesRouter.get('/projects/:id/runs/:number', (req, res) => {
     events: getEvents(run.id),
     logs,
     artifacts: getArtifacts(run.id),
+    screenshots: getScreenshots(run.id),
     activeLog,
     flash: req.flash,
   }));
@@ -396,12 +410,14 @@ pagesRouter.get('/api/runs/:runId', (req, res) => {
   if (!run) return res.status(404).json({ error: 'Run not found.' });
 
   const stages = getStages(run.id);
+  const screenshots = getScreenshots(run.id);
   const since = Number(req.query.since || 0);
 
   res.json({
     status: run.status,
     stage: run.stage,
-    done: isTerminal(run.status),
+    done: isTerminal(run.status) && !['pending', 'ingesting'].includes(screenshots.status),
+    screenshots,
     railHtml: pipelineRail(stages).value,
     railHtmlCompact: pipelineRail(stages, { compact: true }).value,
     events: getEvents(run.id, Number.isFinite(since) ? since : 0).map((e) => ({

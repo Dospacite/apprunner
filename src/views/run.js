@@ -7,9 +7,9 @@ function eventRow(event) {
   return html`<div class="event event-${event.level}"><span class="event-time">${time}</span><span class="event-msg">${event.message}</span></div>`;
 }
 
-export function runPage({ user, project, run, stages, events, logs, artifacts, activeLog, flash }) {
-  const live = run.status === 'queued' || run.status === 'running';
-  const screenshots = artifacts.filter((artifact) => artifact.kind === 'screenshot');
+export function runPage({ user, project, run, stages, events, logs, artifacts, screenshots, activeLog, flash }) {
+  const live = run.status === 'queued' || run.status === 'running'
+    || ['pending', 'ingesting'].includes(screenshots.status);
 
   const logTabs = logs.length
     ? html`<div class="row-wrap">${raw(logs.map((l) => {
@@ -58,17 +58,30 @@ export function runPage({ user, project, run, stages, events, logs, artifacts, a
 
           <div class="card card-flat">
             <h3>Downloads</h3>
-            ${screenshots.length ? html`
-              <div class="stack-3">
-                ${raw(screenshots.map((screenshot) => html`
-                  <a href="/projects/${project.id}/runs/${run.number}/artifacts/${screenshot.id}">
-                    <img
-                      src="/projects/${project.id}/runs/${run.number}/artifacts/${screenshot.id}?inline=1"
-                      alt="Captured iOS app screen"
-                      style="display: block; width: min(100%, 390px); height: auto; border-radius: var(--radius-md); border: 1px solid var(--line)"
-                    >
-                  </a>`.value).join(''))}
-              </div>` : raw('')}
+            ${screenshots.phones.some((phone) => phone.images.length) ? html`
+              <div class="stack-6">
+                ${raw(screenshots.phones.map((phone) => phone.images.length ? html`
+                  <section class="stack-3" aria-labelledby="phone-${phone.key}">
+                    <div class="stack-2">
+                      <h4 id="phone-${phone.key}">${phone.key}</h4>
+                      <p class="body-sm body-muted">
+                        ${phone.resolved ? `${phone.resolved.model}, ${phone.resolved.runtime}` : 'Device details unavailable'}
+                      </p>
+                    </div>
+                    <div class="screenshot-grid">
+                      ${raw(phone.images.map((image) => html`
+                        <a class="screenshot-card" href="/projects/${project.id}/runs/${run.number}/artifacts/${image.artifactId}">
+                          <img
+                            src="/projects/${project.id}/runs/${run.number}/artifacts/${image.artifactId}?inline=1"
+                            alt="${image.name} on ${phone.key}"
+                          >
+                          <span class="body-sm">${image.name}</span>
+                          <span class="body-mono body-meta">${image.widthPixels} × ${image.heightPixels} px</span>
+                        </a>`.value).join(''))}
+                    </div>
+                  </section>`.value : '').join(''))}
+              </div>` : screenshots.status === 'failed' ? html`
+                <p class="body-sm body-warn">Screenshot capture failed: ${screenshots.error}</p>` : raw('')}
             ${artifacts.length ? html`
               <div class="table-scroll">
                 <table class="table">

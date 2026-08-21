@@ -139,6 +139,7 @@ export async function dispatchWorkflow({
   projectSlug,
   skipFirebase,
   captureScreenshot = false,
+  screenshotPhones = ['default'],
   attempts = 4,
 }) {
   const { repo, workflow, ref, dispatchToken } = config.ci;
@@ -153,6 +154,7 @@ export async function dispatchWorkflow({
       project: projectSlug || '',
       skip_firebase: skipFirebase ? 'true' : 'false',
       capture_screenshot: captureScreenshot ? 'true' : 'false',
+      screenshot_phones: JSON.stringify(screenshotPhones),
     },
   });
 

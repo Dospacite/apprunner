@@ -247,6 +247,14 @@ kbd {
 
 .form { display: flex; flex-direction: column; gap: var(--space-4); }
 .form-actions { display: flex; gap: var(--space-3); align-items: center; margin-block-start: var(--space-2); flex-wrap: wrap; }
+.phone-options { margin: 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.phone-options legend { padding-inline: var(--space-1); color: var(--fg); }
+.phone-option { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding-inline: var(--space-2); font-size: var(--text-sm); color: var(--muted); }
+.phone-option input { width: auto; }
+.screenshot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-3); }
+.screenshot-card { display: flex; flex-direction: column; gap: var(--space-2); color: var(--fg); }
+.screenshot-card:hover { text-decoration: none; }
+.screenshot-card img { display: block; width: 100%; height: auto; border-radius: var(--radius-md); border: 1px solid var(--border); }
 
 /* ─── Cards ──────────────────────────────────────────────────────────────── */
 .card {

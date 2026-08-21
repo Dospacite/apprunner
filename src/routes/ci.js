@@ -15,6 +15,7 @@ import {
   failScreenshotIngestion, STAGE_KEYS, isTerminal,
 } from '../runs.js';
 import { validateScreenshotBundle } from '../screenshots.js';
+import { assertScreenshotManifestMatchesRequest, normalizeScreenshotPhones } from '../screenshot-phones.js';
 import * as github from '../github.js';
 import { log } from '../log.js';
 
@@ -111,6 +112,9 @@ ciRouter.get('/resolve', (req, res) => {
       status: target.run.status,
       skipFirebase: Boolean(target.run.skip_firebase),
       captureScreenshot: Boolean(target.run.capture_screenshot),
+      screenshotPhones: target.run.capture_screenshot
+        ? normalizeScreenshotPhones(JSON.parse(target.run.screenshot_phones_json || '["default"]'))
+        : [],
     };
   }
   res.json(payload);
@@ -316,16 +320,19 @@ async function ingestGithubScreenshots(run, { ghRunId, name }) {
     await fs.promises.mkdir(workDir, { recursive: true });
     await execFileAsync('unzip', ['-qq', '-o', zipPath, '-d', workDir]);
     const screenshots = await validateScreenshotBundle(workDir, sha256Of);
+    const requestedPhones = normalizeScreenshotPhones(JSON.parse(run.screenshot_phones_json || '["default"]'));
+    assertScreenshotManifestMatchesRequest(requestedPhones, screenshots);
     const dir = path.join(config.artifactDir, run.id);
     await fs.promises.mkdir(dir, { recursive: true });
 
     const artifacts = [];
     for (const screenshot of screenshots) {
       const id = newId();
-      const storagePath = path.join(dir, `${id}-${screenshot.filename}`);
+      const filename = `${screenshot.phoneKey}--${screenshot.name}.png`;
+      const storagePath = path.join(dir, `${id}-${filename}`);
       await fs.promises.rename(screenshot.sourcePath, storagePath);
       moved.push(storagePath);
-      artifacts.push({ id, storagePath, ...screenshot });
+      artifacts.push({ ...screenshot, id, filename, storagePath });
     }
     completeScreenshotIngestion(run.id, artifacts);
     committed = true;

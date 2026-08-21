@@ -14,6 +14,7 @@ import {
 } from '../runs.js';
 import * as github from '../github.js';
 import { log } from '../log.js';
+import { normalizeScreenshotPhones } from '../screenshot-phones.js';
 
 const upload = multer({ dest: config.tmpDir, limits: { fileSize: config.maxUploadBytes } });
 
@@ -242,12 +243,22 @@ agentRouter.post('/projects/:ref/runs', async (req, res) => {
   const quota = firebaseUsageToday(req.user.id);
   const skipFirebase = Boolean(req.body.skipFirebase) || quota.used >= quota.quota;
   const captureScreenshot = Boolean(req.body.captureScreenshot);
+  let screenshotPhones;
+  try {
+    if (!captureScreenshot && req.body.screenshotPhones !== undefined) {
+      throw new Error('screenshotPhones requires captureScreenshot: true.');
+    }
+    screenshotPhones = captureScreenshot ? normalizeScreenshotPhones(req.body.screenshotPhones) : [];
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
 
   const run = createRun({
     projectId: project.id,
     archiveId: latest.id,
     skipFirebase,
     captureScreenshot,
+    screenshotPhones,
   });
   if (skipFirebase && quota.used >= quota.quota) {
     addEvent(run.id, 'firebase_test', 'warn', `Firebase stage skipped: daily limit reached (${quota.used}/${quota.quota}).`);
@@ -259,6 +270,7 @@ agentRouter.post('/projects/:ref/runs', async (req, res) => {
       projectSlug: project.slug,
       skipFirebase,
       captureScreenshot,
+      screenshotPhones,
     });
     addEvent(run.id, '', 'info', `Dispatched ${config.ci.repo} · ${config.ci.workflow} on ${config.ci.ref}.`);
   } catch (err) {
@@ -284,6 +296,9 @@ agentRouter.get('/runs/:runId', (req, res) => {
       id: a.id, kind: a.kind, filename: a.filename, sizeBytes: a.size_bytes, sha256: a.sha256,
       name: a.kind === 'screenshot' ? (a.screenshot_name || a.filename.replace(/\.png$/i, '')) : undefined,
       ordinal: a.kind === 'screenshot' ? a.screenshot_ordinal : undefined,
+      phone: a.kind === 'screenshot' ? a.screenshot_phone_key : undefined,
+      widthPixels: a.kind === 'screenshot' ? a.screenshot_width_pixels : undefined,
+      heightPixels: a.kind === 'screenshot' ? a.screenshot_height_pixels : undefined,
     })),
   });
 });
